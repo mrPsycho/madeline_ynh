@@ -18,6 +18,8 @@ fi
 
 ynh_config_remove_systemd
 ynh_config_remove_logrotate
+ynh_safe_rm "/etc/tmpfiles.d/$app.conf"
+ynh_safe_rm "/run/$app"
 
 #=================================================
 # REMOVE WEB CONFIGURATION

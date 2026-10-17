@@ -39,6 +39,8 @@ madeline_set_permissions() {
 }
 
 madeline_add_service() {
+    ynh_config_add --template="tmpfiles.conf" --destination="/etc/tmpfiles.d/$app.conf"
+    systemd-tmpfiles --create "/etc/tmpfiles.d/$app.conf"
     ynh_config_add_systemd
     ynh_config_add_logrotate "/var/log/$app"
     yunohost service add "$app" \
