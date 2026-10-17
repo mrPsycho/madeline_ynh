@@ -32,6 +32,22 @@ sudo systemctl start madeline
 
 Uninstalling the app keeps the sessions unless you use `--purge`.
 
+## Passcode lock
+
+Each user can protect their messenger with a passcode (lock icon in the chat list header). It is enforced by the daemon, per browser:
+
+- a browser has to be unlocked with the passcode; it then stays unlocked as long as it is used (typing, clicking, scrolling with the wheel, touching, moving the pointer in a visible tab). After the inactivity delay the user chose (1 minute to 24 hours, 15 minutes suggested), that browser is locked again: the daemon answers `LOCKED` to everything and closes its live-update stream;
+- unlocking one browser or device does not unlock the others; every browser starts locked after the service restarts;
+- the passcode is stored as a bcrypt hash in `/home/yunohost.app/madeline/locks/<user>.json`; after 5 wrong passcodes, attempts are delayed (30 s, doubling up to 1 hour);
+- a user who forgot their passcode can log out of Telegram from the lock screen: this deletes the session and the lock, and they sign in again with their phone number.
+
+To remove the lock of a user (they then need no passcode, their Telegram session is kept):
+
+```bash
+sudo rm /home/yunohost.app/madeline/locks/<user>.json
+sudo systemctl restart madeline
+```
+
 ## Changing settings
 
 ```bash

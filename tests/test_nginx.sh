@@ -154,6 +154,14 @@ for path in /telegram /; do
     curl -s -X POST -H 'X-Test-Sso: carol' -H 'X-Madeline: 1' -H 'Content-Type: text/plain' --data-binary @/tmp/small "localhost:8080$p/api/upload?chat=111&name=s.txt" | grep -q '"ok":true' \
         || fail "small upload through nginx failed"
     pass "uploads pass through nginx and respect upload_max_mb"
+
+    curl -s -D /tmp/lock.h -o /dev/null -X POST -H 'X-Test-Sso: carol' -H 'X-Madeline: 1' -d '{"passcode":"1234","timeout":5}' "localhost:8080$p/api/lock/settings"
+    grep -qi "^set-cookie: madeline_unlock=[0-9a-f]*; Path=$p/api;" /tmp/lock.h || fail "unlock cookie not scoped to $p/api ($(grep -i set-cookie /tmp/lock.h))"
+    curl -s -H 'X-Test-Sso: carol' "localhost:8080$p/api/dialogs" | grep -q '"LOCKED"' || fail "lock not enforced through nginx"
+    cookie="$(grep -i '^set-cookie:' /tmp/lock.h | sed -E 's/^[^=]*=([^;]*).*/\1/' | tr -d '\r')"
+    curl -s -X POST -H 'X-Test-Sso: carol' -H 'X-Madeline: 1' -H "Cookie: madeline_unlock=$cookie" -d '{"current":"1234"}' "localhost:8080$p/api/lock/disable" | grep -q '"enabled":false' \
+        || fail "lock could not be disabled through nginx"
+    pass "the unlock cookie is scoped to the API path"
 done
 
 echo

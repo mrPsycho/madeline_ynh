@@ -29,7 +29,7 @@ madeline_set_permissions() {
     chmod -R u=rwX,g=rX,o= "$install_dir"
     [ ! -e "$install_dir/config.php" ] || chmod 600 "$install_dir/config.php"
 
-    mkdir -p "$data_dir/sessions" "$data_dir/tmp"
+    mkdir -p "$data_dir/sessions" "$data_dir/tmp" "$data_dir/locks"
     chown -R "$app:$app" "$data_dir"
     chmod -R u=rwX,go= "$data_dir"
 

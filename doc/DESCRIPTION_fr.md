@@ -11,6 +11,7 @@ Chaque utilisateur de YunoHost se connecte avec **son propre** compte Telegram (
 - Affichage des photos, autocollants, vidéos, messages vocaux et audio ; téléchargement de tout fichier
 - Envoi de fichiers et de photos (bouton, glisser-déposer ou coller)
 - Déconnexion, qui révoque la session Telegram et la supprime du serveur
+- Verrouillage optionnel par code d'accès, propre à chaque utilisateur : chaque navigateur se verrouille après une durée d'inactivité choisie et n'affiche plus rien avant la saisie du code (appliqué par le serveur)
 - Interface en anglais, français et russe, thèmes clair et sombre, affichage mobile
 
 ### Fonctionnement

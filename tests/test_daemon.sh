@@ -127,6 +127,111 @@ curl -s -D - -o /dev/null -H 'Ynh-User: alice' "localhost:8095/media?chat=111&ms
 expect "$(api bob GET "/media?chat=111&msg=$mid")" '"MEDIA_NOT_FOUND"' "bob can fetch alice's media"
 pass "media is served to its owner only"
 
+# --- passcode lock ----------------------------------------------------------
+# Each "browser" is a cookie value; the clock offset (seconds) fakes time passing.
+clock() { echo "$1" >/tmp/clock-offset; }
+req() { # user cookie method path [json] -> body (headers in /tmp/req.headers)
+    local args=(-s -D /tmp/req.headers -X "$3" "localhost:8095$4" -H "Ynh-User: $1" -H 'X-Forwarded-Prefix: /telegram/api')
+    [ -n "$2" ] && args+=(-H "Cookie: madeline_unlock=$2")
+    [ "$3" != GET ] && args+=(-H "X-Madeline: 1" --data-binary "${5:-{\}}")
+    curl "${args[@]}"
+}
+cookie_of() { grep -i '^set-cookie: madeline_unlock=' /tmp/req.headers | sed -E 's/^[^=]*=([^;]*).*/\1/I' | tr -d '\r'; }
+clock 0
+api dave POST /login/phone '{"phone":"+15550104"}' >/dev/null
+api dave POST /login/code '{"code":"12345"}' >/dev/null
+
+expect "$(req dave '' GET /status)" '"lock":{"enabled":false,"timeout":15,"locked":false}' "lock not reported as disabled"
+expect "$(req dave '' POST /lock/settings '{"timeout":5}')" '"PASSCODE_REQUIRED"' "lock enabled without a passcode"
+expect "$(req dave '' POST /lock/settings '{"passcode":"123","timeout":5}')" '"PASSCODE_INVALID"' "3-character passcode accepted"
+expect "$(req dave '' POST /lock/settings '{"passcode":"1234","timeout":0}')" '"LOCK_TIMEOUT_INVALID"' "timeout 0 accepted"
+out="$(req dave '' POST /lock/settings '{"passcode":"1234","timeout":5}')"
+expect "$out" '"lock":{"enabled":true,"timeout":5,"locked":false}' "enabling the lock failed"
+A="$(cookie_of)"
+[ -n "$A" ] || fail "no unlock cookie after enabling the lock"
+grep -i '^set-cookie:' /tmp/req.headers | grep -qi 'HttpOnly' && grep -i '^set-cookie:' /tmp/req.headers | grep -qi 'Secure' \
+    && grep -i '^set-cookie:' /tmp/req.headers | grep -qi 'SameSite=Strict' && grep -i '^set-cookie:' /tmp/req.headers | grep -qi 'Path=/telegram/api' \
+    || fail "unlock cookie lacks HttpOnly/Secure/SameSite=Strict/Path ($(grep -i '^set-cookie:' /tmp/req.headers))"
+[ "$(stat -c %a /tmp/madeline-data/locks/dave.json)" = 600 ] || fail "lock settings file is not owner-only"
+grep -q '1234' /tmp/madeline-data/locks/dave.json && fail "passcode stored in clear"
+pass "a user can enable the lock; the passcode is hashed, the cookie is HttpOnly/Secure/SameSite, scoped to the API"
+
+out="$(req dave '' GET /status)"
+expect "$out" '"state":"locked"' "another browser is not locked"
+grep -q 'Fake dave\|15550104' <<<"$out" && fail "the locked status leaks the account"
+for r in 'GET /dialogs' 'GET /history?chat=111' 'GET /media?chat=111&msg=1' 'GET /events' 'POST /send' 'POST /read' 'POST /upload?chat=111' 'POST /login/phone' 'POST /lock/settings' 'POST /lock/activity'; do
+    expect "$(req dave '' ${r% *} "${r#* }" '{"chat":111,"text":"x","max_id":1,"phone":"+15550104","timeout":5}')" '"LOCKED"' "$r works in a locked browser"
+done
+[ "$(grep -c '^HTTP/1.1 423' /tmp/req.headers)" = 1 ] || fail "locked requests do not answer 423"
+expect "$(req dave "$A" GET /dialogs)" '"title":"Alice"' "the unlocked browser lost access"
+expect "$(req alice '' GET /dialogs)" '"title":"Alice"' "dave's lock affected alice"
+pass "a locked browser gets nothing (chats, history, media, events, sending, uploads); others are unaffected"
+
+expect "$(req dave '' POST /lock/unlock '{"passcode":"0000"}')" '"PASSCODE_WRONG"' "wrong passcode accepted"
+expect "$(req dave '' POST /lock/unlock '{"passcode":"1234"}')" '"name":"Fake dave"' "unlock failed"
+B="$(cookie_of)"
+[ -n "$B" ] && [ "$B" != "$A" ] || fail "unlocking did not give this browser its own token"
+expect "$(req dave "$B" GET /dialogs)" '"title":"Alice"' "unlocked browser B has no access"
+pass "the passcode unlocks one browser at a time"
+
+clock 240
+expect "$(req dave "$A" POST /lock/activity)" '{"locked":false}' "activity of an unlocked browser refused"
+clock 360
+expect "$(req dave "$A" GET /dialogs)" '"title":"Alice"' "active browser A got locked"
+expect "$(req dave "$B" GET /dialogs)" '"LOCKED"' "browser B idle for 6 min (timeout 5) is still unlocked"
+expect "$(req dave "$B" POST /lock/activity)" '"LOCKED"' "an expired browser can extend its session"
+pass "each browser locks after its own inactivity timeout; activity extends it"
+
+expect "$(req dave '' POST /lock/unlock '{"passcode":"1234"}')" '"state":"ready"' "re-unlock failed"
+C="$(cookie_of)"
+curl -s -N -H 'Ynh-User: dave' -H "Cookie: madeline_unlock=$C" localhost:8095/events >/tmp/c.sse &
+sse=$!
+sleep 0.5
+clock 700
+expect "$(req dave "$A" POST /lock/activity)" '"LOCKED"' "A should have expired too"
+expect "$(req dave '' POST /lock/unlock '{"passcode":"1234"}')" '"state":"ready"' "unlock D failed"
+D="$(cookie_of)"
+req dave "$D" POST /send '{"chat":111,"text":"secret after lock"}' >/dev/null
+sleep 0.5
+grep -q 'secret after lock' /tmp/c.sse && fail "a locked browser still receives live messages"
+grep -q '"type":"locked"' /tmp/c.sse || fail "a locked browser is not told it is locked (got: $(cat /tmp/c.sse))"
+wait "$sse" 2>/dev/null || true
+pass "live events stop at once when a browser locks, with a final 'locked' event"
+
+out="$(req dave "$D" POST /lock/lock)"
+expect "$out" '"state":"locked"' "lock now failed"
+grep -i '^set-cookie:' /tmp/req.headers | grep -qi 'madeline_unlock=;.*Max-Age=0' || fail "lock now does not clear the cookie"
+expect "$(req dave "$D" GET /dialogs)" '"LOCKED"' "the browser is still unlocked after 'lock now'"
+pass "'lock now' locks the browser immediately"
+
+for i in 1 2 3 4 5; do req dave '' POST /lock/unlock '{"passcode":"9999"}' >/dev/null; done
+out="$(req dave '' POST /lock/unlock '{"passcode":"1234"}')"
+expect "$out" '"PASSCODE_FLOOD"' "no delay after 5 wrong passcodes"
+expect "$out" '"seconds":30' "the delay after 5 wrong passcodes is not 30 s"
+clock 731
+expect "$(req dave '' POST /lock/unlock '{"passcode":"1234"}')" '"state":"ready"' "correct passcode refused after the delay"
+E="$(cookie_of)"
+pass "wrong passcodes are throttled, also for the right one"
+
+expect "$(req dave "$E" POST /lock/settings '{"current":"0000","passcode":"5678","timeout":10}')" '"PASSCODE_WRONG"' "settings changed without the current passcode"
+expect "$(req dave "$E" POST /lock/settings '{"current":"1234","passcode":"5678","timeout":10}')" '"timeout":10' "changing the passcode failed"
+F="$(cookie_of)"
+expect "$(req dave "$E" GET /dialogs)" '"LOCKED"' "other tokens survive a passcode change"
+expect "$(req dave '' POST /lock/unlock '{"passcode":"1234"}')" '"PASSCODE_WRONG"' "the old passcode still works"
+expect "$(req dave "$F" POST /lock/disable '{"current":"0000"}')" '"PASSCODE_WRONG"' "lock disabled without the passcode"
+expect "$(req dave "$F" POST /lock/disable '{"current":"5678"}')" '"lock":{"enabled":false' "disabling failed"
+expect "$(req dave '' GET /dialogs)" '"title":"Alice"' "still locked after disabling"
+pass "changing or disabling the lock needs the current passcode"
+
+req dave '' POST /lock/settings '{"passcode":"1234","timeout":5}' >/dev/null
+expect "$(req dave '' POST /logout)" '"state":"logged_out"' "a locked browser cannot log out (forgotten passcode)"
+[ -e /tmp/madeline-data/locks/dave.json ] && fail "the lock survives a Telegram logout"
+api dave POST /login/phone '{"phone":"+15550104"}' >/dev/null
+api dave POST /login/code '{"code":"12345"}' >/dev/null
+expect "$(req dave '' GET /status)" '"lock":{"enabled":false' "the lock is back after logging in again"
+pass "a forgotten passcode: logging out of Telegram removes the lock"
+clock 0
+
 # --- logout ---------------------------------------------------------------
 expect "$(api alice POST /logout)" '"state":"logged_out"' "logout failed"
 sleep 0.3

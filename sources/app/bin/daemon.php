@@ -34,7 +34,7 @@ $handler->setFormatter(new ConsoleFormatter);
 $logger = new Monolog('madeline', [$handler]);
 
 umask(0077);
-foreach (['sessions', 'tmp'] as $sub) {
+foreach (['sessions', 'tmp', 'locks'] as $sub) {
     if (!is_dir($config['data_dir'] . "/$sub")) {
         mkdir($config['data_dir'] . "/$sub", 0700, true);
     }
@@ -67,7 +67,9 @@ if (!str_starts_with($listen, '/')) {
 Madeline\Web\Fs::remove($listen);
 $server->expose($listen);
 $uploadMax = max(1, (int) $config['upload_max_mb']) * 1024 * 1024;
-$server->start(new Api($accounts, $config['data_dir'] . '/tmp', $uploadMax, $logger), new DefaultErrorHandler);
+// Tests inject a clock they can move forward through the config file
+$locks = new Madeline\Web\LockStore($config['data_dir'] . '/locks', $config['lock_clock'] ?? null);
+$server->start(new Api($accounts, $locks, $config['data_dir'] . '/tmp', $uploadMax, $logger), new DefaultErrorHandler);
 // The directory restricts access; the socket itself must be connectable by nginx
 chmod($listen, 0666);
 $logger->notice("Madeline web client {$config['version']} listening on {$listen}");

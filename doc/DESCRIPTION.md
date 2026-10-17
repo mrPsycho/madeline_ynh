@@ -11,6 +11,7 @@ Each YunoHost user signs in with **their own** Telegram account (phone number, l
 - View photos, stickers, videos, voice messages and audio; download any file
 - Upload files and photos (button, drag & drop or paste)
 - Log out, which revokes the Telegram session and deletes it from the server
+- Optional passcode lock, per user: each browser locks itself after a chosen period of inactivity and shows nothing until the passcode is entered (enforced by the server)
 - English, French and Russian interface, light and dark themes, mobile layout
 
 ### How it works

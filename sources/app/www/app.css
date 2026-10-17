@@ -246,12 +246,31 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
   pointer-events: none;
 }
 
+/* ---- lock ---- */
+.lock-icon { color: var(--accent); text-align: center; }
+.lock-buttons { display: inline-flex; gap: .2rem; }
+.icon-button { display: inline-flex; align-items: center; color: var(--muted); }
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, .45);
+}
+.dialog-card { max-width: 440px; max-height: 100%; overflow-y: auto; }
+.row-buttons { display: flex; gap: .5rem; flex-wrap: wrap; }
+.link.danger { color: var(--error); margin-top: .5rem; }
+
 /* ---- mobile: one pane at a time ---- */
 @media (max-width: 720px) {
   .sidebar { width: 100%; max-width: none; border-right: 0; }
   .layout[data-view="list"] .chat { display: none; }
   .layout[data-view="chat"] .sidebar { display: none; }
   .back { display: inline-block; }
+  .bar .lang { max-width: 6.5rem; }
   .msg { max-width: 88%; }
   .messages { padding: .5rem; }
 }

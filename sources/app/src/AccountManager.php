@@ -22,6 +22,8 @@ final class AccountManager
     private array $opening = [];
     /** @var array<string, array<int, Queue<string>>> */
     private array $subscribers = [];
+    /** @var array<int, Closure(): bool> queue id => may this tab still receive events? */
+    private array $gates = [];
 
     /**
      * @param Closure(string $user, bool $create): ?Account $opener
@@ -94,18 +96,46 @@ final class AccountManager
         return \count($this->accounts);
     }
 
-    /** @param Queue<string> $queue */
-    public function subscribe(string $user, Queue $queue): void
+    /**
+     * @param Queue<string> $queue
+     * @param ?Closure(): bool $gate Checked before every event; once false, the tab gets a
+     *                               final "locked" event and its stream is closed.
+     */
+    public function subscribe(string $user, Queue $queue, ?Closure $gate = null): void
     {
         $this->subscribers[$user][spl_object_id($queue)] = $queue;
+        if ($gate !== null) {
+            $this->gates[spl_object_id($queue)] = $gate;
+        }
     }
 
     /** @param Queue<string> $queue */
     public function unsubscribe(string $user, Queue $queue): void
     {
-        unset($this->subscribers[$user][spl_object_id($queue)]);
+        unset($this->subscribers[$user][spl_object_id($queue)], $this->gates[spl_object_id($queue)]);
         if (empty($this->subscribers[$user])) {
             unset($this->subscribers[$user]);
+        }
+    }
+
+    /** Tell one tab it is locked and end its stream. @param Queue<string> $queue */
+    public function closeSubscription(string $user, Queue $queue): void
+    {
+        $this->unsubscribe($user, $queue);
+        if (!$queue->isDisposed() && !$queue->isComplete()) {
+            $queue->pushAsync("data: {\"type\":\"locked\"}\n\n")->ignore();
+            $queue->complete();
+        }
+    }
+
+    /** End the streams of every tab of the user that is no longer allowed to receive events. */
+    public function closeSubscriptions(string $user): void
+    {
+        foreach ($this->subscribers[$user] ?? [] as $id => $queue) {
+            $gate = $this->gates[$id] ?? null;
+            if ($gate !== null && !$gate()) {
+                $this->closeSubscription($user, $queue);
+            }
         }
     }
 
@@ -118,9 +148,14 @@ final class AccountManager
     /** Write a raw SSE frame to every open tab of the user, dropping tabs that went away. */
     public function send(string $user, string $frame): void
     {
-        foreach ($this->subscribers[$user] ?? [] as $queue) {
+        foreach ($this->subscribers[$user] ?? [] as $id => $queue) {
             if ($queue->isDisposed() || $queue->isComplete()) {
                 $this->unsubscribe($user, $queue);
+                continue;
+            }
+            $gate = $this->gates[$id] ?? null;
+            if ($gate !== null && !$gate()) {
+                $this->closeSubscription($user, $queue);
                 continue;
             }
             try {

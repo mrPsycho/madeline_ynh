@@ -28,6 +28,7 @@
     attach: 'M16 7v9a4 4 0 0 1-8 0V6a3 3 0 0 1 6 0v9a1.5 1.5 0 0 1-3 0V8',
     file: 'M6 2h8l5 5v15H6z M14 2v5h5',
     pin: 'M9 3h6l-1 6 3 3H7l3-3z M12 12v9',
+    lock: 'M6 11h12v10H6z M8 11V7a4 4 0 0 1 8 0v4',
   };
 
   function icon(name, size = 18) {
@@ -109,6 +110,7 @@
     const data = await res.json();
     if (data.error) {
       if (data.error === 'LOGGED_OUT' && state.view === 'main') loggedOut();
+      if (data.error === 'LOCKED') lockedOut();
       throw new ApiError(data.error, data);
     }
     return data;
@@ -117,7 +119,7 @@
   function errorText(error) {
     if (!(error instanceof ApiError)) return t('err_generic', (error && error.message) || error);
     const key = 'err_' + error.code;
-    if (error.code === 'FLOOD_WAIT') return t(key, error.extra.seconds);
+    if (error.code === 'FLOOD_WAIT' || error.code === 'PASSCODE_FLOOD') return t(key, error.extra.seconds);
     if (error.code === 'FILE_TOO_LARGE') return t(key, Math.round((error.extra.max || 0) / 1048576));
     return key in STRINGS.en ? t(key) : t('err_generic', error.code);
   }
@@ -138,6 +140,7 @@
     events: null,
     eventsOpenedOnce: false,
     codeType: '',
+    lock: { enabled: false, timeout: 15, locked: false },
   };
   const ui = {};
 
@@ -309,9 +312,212 @@
     renderLogin({ state: 'logged_out' }, t('err_LOGGED_OUT'));
   }
 
+  // Route to the right screen for a /status answer
+  function show(status) {
+    state.user = status.user || state.user;
+    if (status.lock) state.lock = status.lock;
+    if (status.state === 'locked') renderLock();
+    else if (status.state === 'ready') startMain(status);
+    else renderLogin(status);
+  }
+
+  // ------------------------------------------------------------------- lock
+  // The daemon enforces the lock: while this browser is locked it answers
+  // LOCKED to everything and closes the live stream. Here we only drop what
+  // the page holds and show the lock screen.
+  function lockedOut() {
+    if (state.view === 'lock') return;
+    state.lock.locked = true;
+    renderLock();
+  }
+
+  function forget() {
+    stopEvents();
+    closeDialog();
+    state.me = null;
+    state.dialogs = [];
+    state.dialogsNext = null;
+    state.current = null;
+    state.messages.clear();
+    state.hasOlder.clear();
+    document.title = t('app_title');
+  }
+
+  function renderLock(error = '') {
+    forget();
+    state.view = 'lock';
+    const errorBox = el('p', { class: 'error', role: 'alert', text: error, hidden: !error });
+    const input = el('input', { type: 'password', autocomplete: 'current-password', required: true, maxlength: 64, 'aria-label': t('passcode_label') });
+    const button = el('button', { type: 'submit', class: 'primary', text: t('btn_unlock') });
+    const form = el('form', { class: 'stack' }, usernameField(), el('label', { text: t('passcode_label') }, input), errorBox, button);
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      errorBox.hidden = true;
+      try {
+        show(await api('lock/unlock', { method: 'POST', body: { passcode: input.value } }));
+      } catch (e) {
+        errorBox.textContent = errorText(e);
+        errorBox.hidden = false;
+        button.disabled = false;
+        input.select();
+      }
+    });
+    const card = el('div', { class: 'card login' },
+      el('div', { class: 'lock-icon' }, icon('lock', 40)),
+      el('h1', { text: t('lock_title') }),
+      el('p', { class: 'muted', text: t('lock_intro') }),
+      form,
+      el('button', {
+        type: 'button', class: 'link', text: t('forgot_passcode'),
+        onclick: async () => {
+          if (!confirm(t('confirm_forgot'))) return;
+          try {
+            await api('logout', { method: 'POST' });
+          } catch {
+            // The session is gone either way
+          }
+          renderLogin({ state: 'logged_out' });
+        },
+      }),
+      el('div', { class: 'footer' }, langSwitcher()));
+    $('#app').replaceChildren(el('div', { class: 'center-wrap' }, card));
+    input.focus();
+  }
+
+  // Lets password managers tell this passcode apart from other accounts
+  function usernameField() {
+    return el('input', { type: 'text', name: 'username', autocomplete: 'username', value: `${state.user} (Telegram passcode)`, hidden: true, readonly: true, tabindex: -1, 'aria-hidden': 'true' });
+  }
+
+  async function lockNow() {
+    try {
+      await api('lock/lock', { method: 'POST' });
+    } catch {
+      // Locked either way
+    }
+    lockedOut();
+  }
+
+  // Tell the daemon this browser is in use, at most every 30 s (or a third of
+  // the timeout), and only for real interaction in a visible tab: an idle or
+  // background tab lets the lock kick in.
+  let lastActivity = 0;
+  function activity() {
+    if (state.view !== 'main' || !state.lock.enabled || document.visibilityState !== 'visible') return;
+    const every = Math.min(30000, (state.lock.timeout * 60000) / 3);
+    if (Date.now() - lastActivity < every) return;
+    lastActivity = Date.now();
+    api('lock/activity', { method: 'POST' }).then((r) => { if (r.locked) lockedOut(); }).catch(() => {});
+  }
+  // Only real input counts. Not "scroll" (also fired by the page scrolling
+  // itself to new messages), and pointer moves only if the pointer really
+  // moved: Chrome sends synthetic mousemoves when the page changes under a
+  // still cursor, which would keep an unattended tab unlocked.
+  for (const type of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
+    document.addEventListener(type, (e) => { if (e.isTrusted) activity(); }, { capture: true, passive: true });
+  }
+  let pointer = null;
+  document.addEventListener('pointermove', (e) => {
+    if (!e.isTrusted) return;
+    const moved = pointer === null || Math.abs(e.screenX - pointer[0]) + Math.abs(e.screenY - pointer[1]) >= 3;
+    pointer = [e.screenX, e.screenY];
+    if (moved) activity();
+  }, { capture: true, passive: true });
+
+  const TIMEOUTS = [1, 5, 15, 30, 60, 120, 240, 480, 1440];
+  const timeoutLabel = (m) => (m < 60 ? t('minutes_n', m) : t('hours_n', m / 60));
+
+  function closeDialog() {
+    if (ui.dialog) {
+      ui.dialog.remove();
+      ui.dialog = null;
+    }
+  }
+
+  function openLockSettings() {
+    closeDialog();
+    const enabled = state.lock.enabled;
+    const errorBox = el('p', { class: 'error', role: 'alert', hidden: true });
+    const timeout = el('select', { 'aria-label': t('lock_timeout') },
+      [...new Set([...TIMEOUTS, state.lock.timeout])].sort((a, b) => a - b)
+        .map((m) => el('option', { value: m, selected: m === state.lock.timeout, text: timeoutLabel(m) })));
+    const passcode = el('input', { type: 'password', autocomplete: 'new-password', maxlength: 64, required: !enabled });
+    const repeat = el('input', { type: 'password', autocomplete: 'new-password', maxlength: 64, required: !enabled });
+    const current = el('input', { type: 'password', autocomplete: 'current-password', maxlength: 64, required: true });
+    const save = el('button', { type: 'submit', class: 'primary', text: enabled ? t('btn_save') : t('btn_enable_lock') });
+
+    const fail = (e) => {
+      errorBox.textContent = typeof e === 'string' ? e : errorText(e);
+      errorBox.hidden = false;
+    };
+    const done = (status) => {
+      if (status.lock) state.lock = status.lock;
+      lastActivity = Date.now();
+      closeDialog();
+      renderLockButtons();
+    };
+
+    const form = el('form', { class: 'stack' },
+      usernameField(),
+      el('p', { class: 'muted', text: enabled ? t('lock_settings_intro') : t('lock_settings_off') }),
+      el('label', { text: t('lock_timeout') }, timeout),
+      el('label', { text: enabled ? t('new_passcode_optional') : t('new_passcode') }, passcode),
+      el('label', { text: t('repeat_passcode') }, repeat),
+      enabled ? el('label', { text: t('current_passcode') }, current) : null,
+      errorBox,
+      el('div', { class: 'row-buttons' },
+        save,
+        el('button', { type: 'button', text: t('btn_close'), onclick: closeDialog })));
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      errorBox.hidden = true;
+      if (passcode.value !== repeat.value) return fail(t('err_PASSCODE_MISMATCH'));
+      const body = { timeout: Number(timeout.value) };
+      if (passcode.value) body.passcode = passcode.value;
+      if (enabled) body.current = current.value;
+      save.disabled = true;
+      try {
+        done(await api('lock/settings', { method: 'POST', body }));
+      } catch (e) {
+        save.disabled = false;
+        if (e.code !== 'LOCKED') fail(e);
+      }
+    });
+
+    const panel = el('div', { class: 'card dialog-card', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('lock_settings') },
+      el('h2', { text: t('lock_settings') }), form);
+    if (enabled) {
+      panel.append(el('button', {
+        type: 'button', class: 'link danger', text: t('btn_disable_lock'),
+        onclick: async () => {
+          errorBox.hidden = true;
+          if (!current.value) return fail(t('err_PASSCODE_WRONG'));
+          try {
+            done(await api('lock/disable', { method: 'POST', body: { current: current.value } }));
+          } catch (e) {
+            if (e.code !== 'LOCKED') fail(e);
+          }
+        },
+      }));
+    }
+    ui.dialog = el('div', { class: 'overlay', onclick: (e) => { if (e.target === ui.dialog) closeDialog(); } }, panel);
+    ui.dialog.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDialog(); });
+    document.body.append(ui.dialog);
+    (enabled ? current : passcode).focus();
+  }
+
+  function renderLockButtons() {
+    if (!ui.lockButtons) return;
+    const buttons = [el('button', { type: 'button', class: 'ghost icon-button', title: t('lock_settings'), 'aria-label': t('lock_settings'), onclick: openLockSettings }, icon('lock', 18))];
+    if (state.lock.enabled) buttons.push(el('button', { type: 'button', class: 'ghost', text: t('lock_now'), onclick: lockNow }));
+    ui.lockButtons.replaceChildren(...buttons);
+  }
+
   // ------------------------------------------------------------------- main
   function startMain(status) {
     state.view = 'main';
+    lastActivity = Date.now();
     state.me = status.me || null;
     state.dialogs = [];
     state.dialogsNext = null;
@@ -338,6 +544,7 @@
           el('strong', { text: t('app_title') }),
           el('span', { class: 'muted small', text: state.me ? t('signed_in_as', state.me.name || state.me.phone || '') : '' })),
         langSwitcher(),
+        ui.lockButtons = el('span', { class: 'lock-buttons' }),
         el('button', {
           type: 'button', class: 'ghost', text: t('logout'),
           onclick: async () => {
@@ -354,6 +561,7 @@
       el('div', { class: 'search-wrap' }, ui.search),
       ui.dialogs,
       ui.more);
+    renderLockButtons();
 
     ui.chatTitle = el('strong', { class: 'ellipsis' });
     ui.chatSubtitle = el('span', { class: 'muted small' });
@@ -701,7 +909,10 @@
         }
         if (xhr.status === 413 && !data) reject(new ApiError('FILE_TOO_LARGE', { max: 0 }));
         else if (!data) reject(new ApiError('NETWORK'));
-        else if (data.error) reject(new ApiError(data.error, data));
+        else if (data.error) {
+          if (data.error === 'LOCKED') lockedOut();
+          reject(new ApiError(data.error, data));
+        }
         else resolve(data);
       };
       xhr.send(file);
@@ -739,7 +950,7 @@
           try {
             const status = await api('status');
             if (status.state === 'ready') startEvents();
-            else renderLogin(status);
+            else show(status);
           } catch {
             setTimeout(() => { if (state.events === source) startEvents(); }, 10000);
           }
@@ -810,6 +1021,16 @@
       case 'logged_out':
         loggedOut();
         break;
+      case 'locked':
+        // The daemon closed this stream: either this browser is locked, or the
+        // stream predates this browser's current unlock cookie (lock just
+        // enabled or passcode changed here). Ask with the current cookie.
+        stopEvents();
+        api('status').then((status) => {
+          if (status.state === 'locked') lockedOut();
+          else if (state.view === 'main') startEvents();
+        }).catch(() => {});
+        break;
     }
   }
 
@@ -820,17 +1041,20 @@
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && state.view === 'main' && state.current) markRead(state.current);
+    if (document.visibilityState !== 'visible' || state.view !== 'main') return;
+    if (state.lock.enabled) {
+      // Back from the background: the daemon may have locked us meanwhile
+      api('status').then((status) => { if (status.state === 'locked') lockedOut(); else if (state.current) markRead(state.current); }).catch(() => {});
+    } else if (state.current) {
+      markRead(state.current);
+    }
   });
 
   // ------------------------------------------------------------------ start
   async function boot() {
     renderLoading();
     try {
-      const status = await api('status');
-      state.user = status.user || '';
-      if (status.state === 'ready') startMain(status);
-      else renderLogin(status);
+      show(await api('status'));
     } catch (e) {
       $('#app').replaceChildren(el('div', { class: 'center-wrap' },
         el('div', { class: 'card' },
