@@ -1,0 +1,49 @@
+#!/bin/bash
+
+#=================================================
+# COMMON VARIABLES AND HELPERS
+#=================================================
+
+source _common.sh
+source /usr/share/yunohost/helpers
+
+version=$(ynh_read_manifest "version")
+
+#=================================================
+# STOP SERVICE
+#=================================================
+ynh_script_progression "Stopping $app's systemd service..."
+
+# Stopping makes MadelineProto save every open session
+ynh_systemctl --action=stop
+
+#=================================================
+# UPGRADE THE WEB CLIENT AND ITS PHP DEPENDENCIES
+#=================================================
+ynh_script_progression "Upgrading source files..."
+
+madeline_setup_app
+
+#=================================================
+# UPDATE CONFIGURATION
+#=================================================
+ynh_script_progression "Updating $app's configuration files..."
+
+madeline_add_config
+madeline_set_permissions
+
+ynh_config_add_nginx
+madeline_add_service
+
+#=================================================
+# START SYSTEMD SERVICE
+#=================================================
+ynh_script_progression "Starting $app's systemd service..."
+
+ynh_systemctl --action=start --wait_until="listening on"
+
+#=================================================
+# END OF SCRIPT
+#=================================================
+
+ynh_script_progression "Upgrade of $app completed"

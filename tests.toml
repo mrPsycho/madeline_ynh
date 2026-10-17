@@ -1,0 +1,12 @@
+#:schema https://raw.githubusercontent.com/YunoHost/apps/main/schemas/tests.v1.schema.json
+
+test_format = 1.0
+
+[default]
+    # Dummy credentials: package_check never logs into Telegram, it only checks
+    # that the web client and its daemon come up.
+    args.api_id = 12345
+    args.api_hash = "0123456789abcdef0123456789abcdef"
+    args.upload_max_mb = 50
+
+    exclude = ["install.multi"]

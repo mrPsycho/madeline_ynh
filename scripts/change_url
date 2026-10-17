@@ -1,0 +1,22 @@
+#!/bin/bash
+
+#=================================================
+# COMMON VARIABLES AND HELPERS
+#=================================================
+
+source _common.sh
+source /usr/share/yunohost/helpers
+
+#=================================================
+# MODIFY URL IN NGINX CONF
+# The web client only uses relative URLs, so nginx is all there is to change.
+#=================================================
+ynh_script_progression "Updating nginx web server configuration..."
+
+ynh_config_change_url_nginx
+
+#=================================================
+# END OF SCRIPT
+#=================================================
+
+ynh_script_progression "Change of URL completed for $app"

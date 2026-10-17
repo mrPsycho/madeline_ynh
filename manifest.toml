@@ -1,0 +1,92 @@
+#:schema https://raw.githubusercontent.com/YunoHost/apps/master/schemas/manifest.v2.schema.json
+
+packaging_format = 2
+id = "madeline"
+name = "Madeline"
+description.en = "Telegram web client for your YunoHost users, powered by MadelineProto"
+description.fr = "Client web Telegram pour les utilisateurs de YunoHost, propulsé par MadelineProto"
+
+version = "8.7.0~ynh1"
+
+maintainers = ["mrpsycho"]
+
+[upstream]
+license = "AGPL-3.0-only"
+website = "https://docs.madelineproto.xyz"
+admindoc = "https://docs.madelineproto.xyz/docs/REQUIREMENTS.html"
+code = "https://github.com/danog/MadelineProto"
+
+[integration]
+yunohost = ">= 12.1.38"
+helpers_version = "2.1"
+architectures = "all"
+multi_instance = false
+
+# Users log into Telegram with their own phone number, not with LDAP...
+ldap = false
+# ...but the app is behind the YunoHost SSO, which tells it who the user is.
+sso = true
+
+ram.build = "300M"
+# The daemon itself (~30 MB), plus roughly 20-100 MB per logged-in Telegram account
+ram.runtime = "150M"
+disk = "100M"
+
+[install]
+    [install.domain]
+    type = "domain"
+
+    [install.path]
+    type = "path"
+    default = "/telegram"
+
+    [install.init_main_permission]
+    type = "group"
+    default = "all_users"
+
+    [install.api_id]
+    type = "number"
+    ask.en = "Telegram api_id of your application (create one at https://my.telegram.org → API development tools)"
+    ask.fr = "api_id Telegram de votre application (à créer sur https://my.telegram.org → API development tools)"
+    # Explicit bounds are mandatory: the webadmin turns an absent max into a
+    # `null` one and then rejects every value.
+    min = 1
+    max = 2147483647
+
+    [install.api_hash]
+    type = "string"
+    ask.en = "Telegram api_hash of the same application (32 hexadecimal characters)"
+    ask.fr = "api_hash Telegram de la même application (32 caractères hexadécimaux)"
+    pattern.regexp = "^[0-9a-fA-F]{32}$"
+    pattern.error = "The api_hash must be 32 hexadecimal characters"
+
+    [install.upload_max_mb]
+    type = "number"
+    ask.en = "Maximum size of a file uploaded through the web client, in MB"
+    ask.fr = "Taille maximale d'un fichier envoyé depuis le client web, en Mo"
+    default = 50
+    min = 1
+    max = 2000
+
+[resources]
+    [resources.system_user]
+
+    [resources.install_dir]
+
+    [resources.data_dir]
+    subdirs = ["sessions", "tmp"]
+
+    [resources.permissions]
+        [resources.permissions.main]
+        url = "/"
+
+    [resources.ports]
+        # The daemon only listens on loopback; nginx proxies api/ to it
+        [resources.ports.main]
+        default = 8095
+
+    [resources.apt]
+    packages = "php8.2-cli, php8.2-xml, php8.2-gmp, php8.2-bcmath, php8.2-mbstring, php8.2-curl, php8.2-zip"
+
+    [resources.composer]
+    version = "2.10.3"

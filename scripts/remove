@@ -1,0 +1,36 @@
+#!/bin/bash
+
+#=================================================
+# COMMON VARIABLES AND HELPERS
+#=================================================
+
+source _common.sh
+source /usr/share/yunohost/helpers
+
+#=================================================
+# STOP AND REMOVE SERVICE
+#=================================================
+ynh_script_progression "Stopping and removing the systemd service..."
+
+if ynh_hide_warnings yunohost service status "$app" >/dev/null; then
+    yunohost service remove "$app"
+fi
+
+ynh_config_remove_systemd
+ynh_config_remove_logrotate
+
+#=================================================
+# REMOVE WEB CONFIGURATION
+#=================================================
+ynh_script_progression "Removing the nginx configuration..."
+
+ynh_config_remove_nginx
+
+#=================================================
+# END OF SCRIPT
+# Note: the system user, install_dir, apt packages and composer are removed by
+# YunoHost via [resources]. data_dir (the users' Telegram sessions) is only
+# deleted with --purge.
+#=================================================
+
+ynh_script_progression "Removal of $app completed"

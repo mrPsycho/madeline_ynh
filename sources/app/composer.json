@@ -1,0 +1,22 @@
+{
+    "name": "yunohost-apps/madeline",
+    "description": "Telegram web client for YunoHost, powered by MadelineProto",
+    "type": "project",
+    "license": "AGPL-3.0-only",
+    "require": {
+        "php-64bit": ">=8.2",
+        "danog/madelineproto": "^8.7"
+    },
+    "autoload": {
+        "psr-4": {
+            "Madeline\\Web\\": "src/"
+        }
+    },
+    "config": {
+        "platform": {
+            "php": "8.2.4"
+        },
+        "optimize-autoloader": true,
+        "sort-packages": true
+    }
+}

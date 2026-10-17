@@ -1,0 +1,40 @@
+#!/bin/bash
+
+#=================================================
+# COMMON VARIABLES AND HELPERS
+#=================================================
+
+source ../settings/scripts/_common.sh
+source /usr/share/yunohost/helpers
+
+#=================================================
+# RESTORE THE APP MAIN DIR AND THE SESSIONS
+#=================================================
+ynh_script_progression "Restoring the app main directory and the Telegram sessions..."
+
+ynh_restore "$install_dir"
+ynh_restore "$data_dir"
+
+madeline_set_permissions
+
+#=================================================
+# RESTORE SYSTEM CONFIGURATIONS
+#=================================================
+ynh_script_progression "Restoring system configurations related to $app..."
+
+ynh_config_add_nginx
+madeline_add_service
+
+#=================================================
+# START SYSTEMD SERVICE
+#=================================================
+ynh_script_progression "Starting $app's systemd service..."
+
+ynh_systemctl --action=enable
+ynh_systemctl --action=start --wait_until="listening on"
+
+#=================================================
+# END OF SCRIPT
+#=================================================
+
+ynh_script_progression "Restoration completed for $app"

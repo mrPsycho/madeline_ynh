@@ -1,0 +1,31 @@
+<?php declare(strict_types=1);
+
+// Daemon config for tests/test_daemon.sh: same keys as conf/config.php, plus a
+// fake account opener so no request ever reaches Telegram.
+
+require __DIR__ . '/FakeAccount.php';
+
+use Madeline\Web\Test\FakeAccount;
+
+return [
+    'app'           => 'madeline',
+    'version'       => 'test',
+    'listen'        => '127.0.0.1:8095',
+    'data_dir'      => '/tmp/madeline-data',
+    'log_dir'       => '/tmp',
+    'api_id'        => 12345,
+    'api_hash'      => '0123456789abcdef0123456789abcdef',
+    'upload_max_mb' => 1,
+    // Mimics MadelineAccount::open(): null when the user has no session and
+    // $create is false; a logged-out (closed) session is gone for good.
+    'account_opener' => static function (string $user, bool $create): ?FakeAccount {
+        static $accounts = [];
+        if (isset($accounts[$user]) && $accounts[$user]->closed) {
+            unset($accounts[$user]);
+        }
+        if (!isset($accounts[$user]) && $create) {
+            $accounts[$user] = new FakeAccount($user);
+        }
+        return $accounts[$user] ?? null;
+    },
+];
