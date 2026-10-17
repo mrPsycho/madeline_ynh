@@ -437,11 +437,11 @@ final class MadelineAccount implements Account
             case 'updateDeleteMessages':
                 return ['type' => 'delete', 'chat' => null, 'ids' => array_map('intval', $update['messages'] ?? [])];
             case 'updateDeleteChannelMessages':
-                return ['type' => 'delete', 'chat' => Normalizer::peerId(['_' => 'peerChannel', 'channel_id' => $update['channel_id']]), 'ids' => array_map('intval', $update['messages'] ?? [])];
+                return ['type' => 'delete', 'chat' => Normalizer::peerId((int) $update['channel_id']), 'ids' => array_map('intval', $update['messages'] ?? [])];
             case 'updateReadHistoryInbox':
                 return ['type' => 'read', 'chat' => Normalizer::peerId($update['peer']), 'unread' => (int) ($update['still_unread_count'] ?? 0)];
             case 'updateReadChannelInbox':
-                return ['type' => 'read', 'chat' => Normalizer::peerId(['_' => 'peerChannel', 'channel_id' => $update['channel_id']]), 'unread' => (int) ($update['still_unread_count'] ?? 0)];
+                return ['type' => 'read', 'chat' => Normalizer::peerId((int) $update['channel_id']), 'unread' => (int) ($update['still_unread_count'] ?? 0)];
             default:
                 return null;
         }

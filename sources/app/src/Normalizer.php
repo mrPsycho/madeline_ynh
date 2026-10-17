@@ -28,15 +28,28 @@ final class Normalizer
         'messageActionChannelMigrateFrom' => 'migrated',
     ];
 
-    /** Bot-API style id of a peer / input peer / user / chat array. */
-    public static function peerId(array $peer): int
+    /**
+     * Bot-API style id of a peer, as MadelineProto (>= 8) returns them:
+     * Peer objects are already deserialized to plain ints, and the "id",
+     * "chat_id" and "channel_id" fields are already signed/offset (see
+     * danog\MadelineProto\TL\TL::deserialize). Nothing must be converted again.
+     */
+    public static function peerId(int|array $peer): int
     {
-        return match ($peer['_'] ?? '') {
-            'peerUser', 'inputPeerUser', 'user', 'userEmpty' => (int) ($peer['user_id'] ?? $peer['id']),
-            'peerChat', 'inputPeerChat', 'chat', 'chatEmpty', 'chatForbidden' => -(int) ($peer['chat_id'] ?? $peer['id']),
-            'peerChannel', 'inputPeerChannel', 'channel', 'channelForbidden' => -(self::CHANNEL_OFFSET + (int) ($peer['channel_id'] ?? $peer['id'])),
-            default => throw new ApiError(500, 'UNKNOWN_PEER'),
+        if (\is_int($peer)) {
+            return $peer;
+        }
+        $id = match ($peer['_'] ?? '') {
+            'user', 'userEmpty', 'chat', 'chatEmpty', 'chatForbidden', 'channel', 'channelForbidden' => $peer['id'] ?? null,
+            'peerUser', 'inputPeerUser' => $peer['user_id'] ?? null,
+            'peerChat', 'inputPeerChat' => $peer['chat_id'] ?? null,
+            'peerChannel', 'inputPeerChannel' => $peer['channel_id'] ?? null,
+            default => null,
         };
+        if (!\is_int($id) || $id === 0) {
+            throw new ApiError(500, 'UNKNOWN_PEER');
+        }
+        return $id;
     }
 
     public static function isChannelId(int $id): bool
