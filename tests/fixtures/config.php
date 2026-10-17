@@ -10,8 +10,8 @@ use Madeline\Web\Test\FakeAccount;
 return [
     'app'           => 'madeline',
     'version'       => 'test',
-    'listen'        => '127.0.0.1:8095',
-    'data_dir'      => '/tmp/madeline-data',
+    'listen'        => getenv('MADELINE_SOCKET') ?: '/tmp/madeline.sock',
+    'data_dir'      => getenv('MADELINE_DATA') ?: '/tmp/madeline-data',
     'log_dir'       => '/tmp',
     'api_id'        => 12345,
     'api_hash'      => '0123456789abcdef0123456789abcdef',

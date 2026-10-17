@@ -17,6 +17,8 @@ rm -rf vendor
 composer install --no-dev --no-interaction --no-progress --quiet
 php -d zend.assertions=-1 bin/daemon.php /pkg/tests/fixtures/config.php >/tmp/daemon.log 2>&1 &
 daemon_pid=$!
+# Every curl below talks to the daemon's Unix socket ("localhost:8095" is just a label)
+echo 'unix-socket = "/tmp/madeline.sock"' >~/.curlrc
 for _ in $(seq 50); do curl -s -o /dev/null localhost:8095/status && break; sleep 0.2; done
 
 fail() { echo "FAIL: $*"; echo "--- daemon log"; cat /tmp/daemon.log; exit 1; }
@@ -30,6 +32,11 @@ api() { # user method path [json]
 expect() { # output needle message
     grep -qF -- "$2" <<<"$1" || fail "$3 (got: $1)"
 }
+
+# --- transport ------------------------------------------------------------
+[ -S /tmp/madeline.sock ] || fail "the daemon does not listen on its Unix socket"
+grep -qE ':(1F7F|1f7f) ' /proc/net/tcp /proc/net/tcp6 && fail "the daemon listens on a TCP port"
+pass "the daemon listens on a Unix socket only"
 
 # --- identity -------------------------------------------------------------
 expect "$(api '' GET /status)" '"NOT_AUTHENTICATED"' "request without SSO user accepted"

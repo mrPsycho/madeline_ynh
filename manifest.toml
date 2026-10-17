@@ -6,7 +6,7 @@ name = "Madeline"
 description.en = "Telegram web client for your YunoHost users, powered by MadelineProto"
 description.fr = "Client web Telegram pour les utilisateurs de YunoHost, propulsé par MadelineProto"
 
-version = "8.7.0~ynh2"
+version = "8.7.0~ynh3"
 
 maintainers = ["mrpsycho"]
 
@@ -79,11 +79,6 @@ disk = "100M"
     [resources.permissions]
         [resources.permissions.main]
         url = "/"
-
-    [resources.ports]
-        # The daemon only listens on loopback; nginx proxies api/ to it
-        [resources.ports.main]
-        default = 8095
 
     [resources.apt]
     packages = "php8.2-cli, php8.2-xml, php8.2-gmp, php8.2-bcmath, php8.2-mbstring, php8.2-curl, php8.2-zip"

@@ -6,6 +6,7 @@ const STRINGS = {
   en: {
     app_title: 'Telegram',
     loading: 'Loading…',
+    loading_slow: 'Connecting to Telegram… This can take a little while after the server restarted.',
     language: 'Language',
     login_title: 'Sign in to Telegram',
     login_intro: 'Use your own Telegram account. The session is stored on this server and only you ({0}) can use it.',
@@ -87,10 +88,12 @@ const STRINGS = {
     err_MESSAGE_TOO_LONG: 'The message is too long (4096 characters at most).',
     err_CHAT_WRITE_FORBIDDEN: 'You are not allowed to write in this chat.',
     err_CHAT_ADMIN_REQUIRED: 'Only administrators can post in this chat.',
+    err_LOGIN_NOT_STARTED: 'This login attempt has expired. Please request a new code.',
   },
   fr: {
     app_title: 'Telegram',
     loading: 'Chargement…',
+    loading_slow: 'Connexion à Telegram… Cela peut prendre un moment après un redémarrage du serveur.',
     language: 'Langue',
     login_title: 'Se connecter à Telegram',
     login_intro: 'Utilisez votre propre compte Telegram. La session est conservée sur ce serveur et vous seul·e ({0}) pouvez l’utiliser.',
@@ -172,10 +175,12 @@ const STRINGS = {
     err_MESSAGE_TOO_LONG: 'Le message est trop long (4096 caractères au maximum).',
     err_CHAT_WRITE_FORBIDDEN: 'Vous n’avez pas le droit d’écrire dans cette discussion.',
     err_CHAT_ADMIN_REQUIRED: 'Seuls les administrateurs peuvent publier ici.',
+    err_LOGIN_NOT_STARTED: 'Cette tentative de connexion a expiré. Demandez un nouveau code.',
   },
   ru: {
     app_title: 'Telegram',
     loading: 'Загрузка…',
+    loading_slow: 'Подключение к Telegram… После перезапуска сервера это может занять некоторое время.',
     language: 'Язык',
     login_title: 'Вход в Telegram',
     login_intro: 'Используйте свой собственный аккаунт Telegram. Сессия хранится на этом сервере и доступна только вам ({0}).',
@@ -257,6 +262,7 @@ const STRINGS = {
     err_MESSAGE_TOO_LONG: 'Сообщение слишком длинное (не более 4096 символов).',
     err_CHAT_WRITE_FORBIDDEN: 'Вам нельзя писать в этот чат.',
     err_CHAT_ADMIN_REQUIRED: 'Публиковать здесь могут только администраторы.',
+    err_LOGIN_NOT_STARTED: 'Срок действия попытки входа истёк. Запросите новый код.',
   },
 };
 

@@ -3,7 +3,9 @@
 # Telegram account: with dummy api_id/api_hash credentials it checks that a
 # session is created in-process (no IPC worker), that Telegram's refusal comes
 # back as a clean API_ID_INVALID error, that logging out deletes the session,
-# and how much memory one session costs. Needs Internet access.
+# and how much memory one session costs. With TG_API_ID/TG_API_HASH set (real
+# credentials, never committed) it also runs the login flow on Telegram's test
+# data centers. Needs Internet access.
 # Requires podman (or docker).
 
 set -euo pipefail
@@ -11,7 +13,7 @@ set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 source "$repo/tests/_image.sh"
 
-"$runtime" run --rm -i -v "$repo:/pkg:ro,z" -v "$cache:/root/.cache/composer:z" "$image" bash -s <<'EOF'
+"$runtime" run --rm -i -e TG_API_ID -e TG_API_HASH -v "$repo:/pkg:ro,z" -v "$cache:/root/.cache/composer:z" "$image" bash -s <<'EOF'
 set -euo pipefail
 cp -r /pkg/sources/app /app && cd /app
 composer install --no-dev --no-interaction --no-progress --quiet
@@ -78,6 +80,27 @@ MadelineAccount::open($cfg, 'bob', false, $log) === null || $fail('abandoned log
 MadelineAccount::cleanup('/data');
 glob('/data/sessions/bob/*.madeline') === [] || $fail('abandoned login left session files behind');
 echo "PASS: an abandoned login leaves nothing behind\n";
+
+// With real credentials (TG_API_ID / TG_API_HASH, never committed), check the
+// login flow on Telegram's test data centers.
+if (getenv('TG_API_ID')) {
+    $test = ['api_id' => (int) getenv('TG_API_ID'), 'api_hash' => (string) getenv('TG_API_HASH'), 'test_mode' => true] + $cfg;
+    $t = MadelineAccount::open($test, 'carol', true, $log);
+    $t->sendCode('+99966' . '2' . random_int(1000, 9999))['state'] === 'code' || $fail('test DC did not send a code');
+    foreach (['00000', '00001'] as $wrong) {
+        try {
+            $t->submitCode($wrong);
+            $fail('a wrong code was accepted');
+        } catch (ApiError $e) {
+            $e->errorCode === 'PHONE_CODE_INVALID' || $fail("wrong code $wrong gave {$e->errorCode}");
+        }
+        $t->status()['state'] === 'code' || $fail('a wrong code ended the login attempt');
+    }
+    echo "PASS: a mistyped code can be retried (Telegram test DC)\n";
+    $t->close(true);
+} else {
+    echo "SKIP: login flow on Telegram's test DC (set TG_API_ID and TG_API_HASH)\n";
+}
 PHP
 
 timeout 120 php -d zend.assertions=-1 /tmp/t.php

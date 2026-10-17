@@ -24,14 +24,20 @@ set -euo pipefail
 mkdir -p /var/www/madeline && cp -r /pkg/sources/app/. /var/www/madeline/ && cd /var/www/madeline
 rm -rf vendor
 composer install --no-dev --no-interaction --no-progress --quiet
-php -d zend.assertions=-1 bin/daemon.php /pkg/tests/fixtures/config.php >/tmp/daemon.log 2>&1 &
-for _ in $(seq 50); do curl -s -o /dev/null localhost:8095/status && break; sleep 0.2; done
+# Same permission model as conf/systemd.service: the daemon runs as its own
+# user, its socket directory is madeline:www-data 0750.
+useradd --system madeline
+mkdir -p /run/madeline /var/lib/madeline-data
+chown madeline:www-data /run/madeline && chmod 0750 /run/madeline
+chown madeline: /var/lib/madeline-data
+su madeline -s /bin/bash -c 'MADELINE_SOCKET=/run/madeline/daemon.sock MADELINE_DATA=/var/lib/madeline-data php -d zend.assertions=-1 bin/daemon.php /pkg/tests/fixtures/config.php' >/tmp/daemon.log 2>&1 &
+for _ in $(seq 50); do curl -s -o /dev/null --unix-socket /run/madeline/daemon.sock http://d/status && break; sleep 0.2; done
 
 render() { # path -> rendered app conf, like ynh_config_add + ynh_config_add_nginx
     local path="$1" out
     out="$(cat /pkg/conf/nginx.conf)"
     [ "$path" = "/" ] && out="${out//__PATH__\//\/}"
-    out="$(sed -e "s@__PATH__@$path@g" -e "s@__PORT__@8095@g" -e "s@__UPLOAD_MAX_MB__@1@g" \
+    out="$(sed -e "s@__PATH__@$path@g" -e "s@__APP__@madeline@g" -e "s@__UPLOAD_MAX_MB__@1@g" \
                -e "s@__INSTALL_DIR__@/var/www/madeline@g" <<<"$out")"
     if [ "$path" != "/" ]; then out="$(sed 's/^#sub_path_only//' <<<"$out")"; else out="$(sed 's/^#root_path_only//' <<<"$out")"; fi
     grep -q '__[A-Z0-9_]*__' <<<"$out" && { echo "FAIL: unrendered placeholder"; exit 1; }
@@ -118,6 +124,12 @@ for path in /telegram /; do
     curl -s -H 'Ynh-User: bob' "localhost:8080$p/api/status" | grep -q 'NOT_AUTHENTICATED' || fail "client-sent Ynh-User trusted"
     curl -s -H 'X-Test-Sso: alice' -H 'Ynh-User: bob' "localhost:8080$p/api/status" | grep -q '"user":"alice"' || fail "client-sent Ynh-User overrides the SSO user"
     pass "only the SSO identity reaches the daemon"
+
+    if [ "$path" = /telegram ]; then
+        su nobody -s /bin/bash -c "curl -s -m 3 --unix-socket /run/madeline/daemon.sock -H 'Ynh-User: alice' http://d/status" | grep -q '"user"' \
+            && fail "another local user can talk to the daemon and impersonate users"
+        pass "other local users cannot reach the daemon socket"
+    fi
 
     h="$(head_of "$p/api/status" alice)"
     grep -qi "^content-security-policy: default-src 'self'" <<<"$h" && fail "page CSP leaks onto API responses"

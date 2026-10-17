@@ -211,9 +211,12 @@
   }
 
   // ------------------------------------------------------------------ login
-  function renderLoading(text = t('loading')) {
+  function renderLoading() {
     state.view = 'loading';
-    $('#app').replaceChildren(el('p', { class: 'center muted', text }));
+    const slow = el('p', { class: 'muted small', text: t('loading_slow'), hidden: true });
+    $('#app').replaceChildren(el('div', { class: 'center-wrap' },
+      el('div', { class: 'loading', role: 'status' }, el('span', { class: 'spinner', 'aria-hidden': 'true' }), el('p', { text: t('loading') }), slow)));
+    setTimeout(() => { slow.hidden = false; }, 4000);
   }
 
   function renderLogin(status, error = '') {
@@ -274,6 +277,7 @@
           errorBox.hidden = false;
           button.disabled = false;
           if (e.code === 'SIGNUP_REQUIRED') renderLogin({ state: 'signup' });
+          else if (e.code === 'PHONE_CODE_EXPIRED' || e.code === 'LOGIN_NOT_STARTED') renderLogin({ state: 'logged_out' }, errorText(e));
           else input.focus();
         }
       });

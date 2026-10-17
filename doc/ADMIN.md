@@ -12,7 +12,9 @@ Access follows the app's main permission (all users by default). Every YunoHost 
 | Logs | `/var/log/madeline/madeline.log` (daemon), `/var/log/madeline/madelineproto.log` (Telegram library warnings) |
 | Service | `madeline.service` (`systemctl status madeline`) |
 
-The daemon listens on `127.0.0.1` only; nginx proxies `<app path>/api/` to it and serves `<app path>/` from `www/`.
+The daemon listens on the Unix socket `/run/madeline/daemon.sock`, in a directory only nginx (`www-data`) may enter: it trusts the YunoHost user name nginx passes along, so no other local user or app must be able to talk to it. nginx proxies `<app path>/api/` to it and serves `<app path>/` from `www/`.
+
+All saved sessions are loaded when the service starts, so users get their chats and live updates right away; right after a restart, the first page load may still take a few seconds.
 
 ## Telegram sessions are credentials
 

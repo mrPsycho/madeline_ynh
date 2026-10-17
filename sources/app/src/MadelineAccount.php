@@ -116,6 +116,10 @@ final class MadelineAccount implements Account
             ->setExtra($config['log_dir'] . '/madelineproto.log')
             ->setLevel(Logger::LEVEL_WARNING)
             ->setMaxSize(10 * 1024 * 1024);
+        // Telegram's test data centers, for tests/test_session_restart.sh only
+        if (!empty($config['test_mode'])) {
+            $settings->getConnection()->setTestMode(true);
+        }
         return $settings;
     }
 
@@ -151,7 +155,16 @@ final class MadelineAccount implements Account
         if ($this->state() !== API::WAITING_CODE) {
             throw new ApiError(HttpStatus::CONFLICT, 'LOGIN_NOT_STARTED');
         }
-        $result = $this->call(fn (API $api) => $api->completePhoneLogin(preg_replace('/\D/', '', $code)));
+        try {
+            $result = $this->call(fn (API $api) => $api->completePhoneLogin(preg_replace('/\D/', '', $code)));
+        } catch (ApiError $e) {
+            // completePhoneLogin() leaves the session logged out on any error,
+            // although the code request is still valid: let the user retry a typo.
+            if (\in_array($e->errorCode, ['PHONE_CODE_INVALID', 'PHONE_CODE_EMPTY'], true) && $this->state() === API::NOT_LOGGED_IN) {
+                $this->mtproto()?->setLoginState(API::WAITING_CODE);
+            }
+            throw $e;
+        }
         if (($result['_'] ?? '') === 'account.password') {
             $this->hint = (string) ($result['hint'] ?? '');
         } elseif (($result['_'] ?? '') === 'account.needSignup') {
@@ -291,6 +304,17 @@ final class MadelineAccount implements Account
     private function state(): int
     {
         return $this->api?->getAuthorization() ?? API::LOGGED_OUT;
+    }
+
+    /** The in-process MTProto instance behind the API facade (for internals the facade doesn't expose). */
+    private function mtproto(): ?\danog\MadelineProto\MTProto
+    {
+        $api = $this->api;
+        if ($api === null) {
+            return null;
+        }
+        $instance = (fn () => $this->wrapper->getAPI())->call($api);
+        return $instance instanceof \danog\MadelineProto\MTProto ? $instance : null;
     }
 
     /**

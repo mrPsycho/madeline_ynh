@@ -4,7 +4,7 @@
 return [
     'app'           => '__APP__',
     'version'       => '__VERSION__',
-    'listen'        => '127.0.0.1:__PORT__',
+    'listen'        => '/run/__APP__/daemon.sock',
     'data_dir'      => '__DATA_DIR__',
     'log_dir'       => '/var/log/__APP__',
     'api_id'        => __API_ID__,

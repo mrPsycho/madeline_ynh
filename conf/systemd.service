@@ -8,6 +8,11 @@ Type=simple
 User=__APP__
 Group=__APP__
 WorkingDirectory=__DATA_DIR__/
+# The API socket lives in /run/__APP__ (madeline:www-data, 0750): only nginx
+# can reach it. "+" runs the chgrp as root, outside the sandbox below.
+RuntimeDirectory=__APP__
+RuntimeDirectoryMode=0750
+ExecStartPre=+/usr/bin/chgrp www-data /run/__APP__
 ExecStart=/usr/bin/php__PHP_VERSION__ -d zend.assertions=-1 __INSTALL_DIR__/bin/daemon.php __INSTALL_DIR__/config.php
 StandardOutput=append:/var/log/__APP__/__APP__.log
 StandardError=inherit

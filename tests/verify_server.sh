@@ -14,7 +14,7 @@ settings="/etc/yunohost/apps/$app/settings.yml"
 setting() { grep -oP "^$1: '?\K[^']*" "$settings"; }
 install_dir="$(setting install_dir)"
 data_dir="$(setting data_dir)"
-port="$(setting port)"
+sock="/run/$app/daemon.sock"
 domain="$(setting domain)"
 path="$(setting path)"
 
@@ -26,15 +26,17 @@ check() { # description, command...
 }
 
 check "service $app is active" systemctl is-active --quiet "$app"
-check "daemon listens on 127.0.0.1:$port" bash -c "ss -ltn | grep -q '127.0.0.1:$port '"
-check "daemon does not listen on a public address" bash -c "! ss -ltn | grep -E ':$port ' | grep -vq '127.0.0.1:$port '"
+check "daemon listens on $sock" test -S "$sock"
+check "socket dir is $app:www-data 0750" bash -c "[ \"\$(stat -c %U:%G:%a /run/$app)\" = '$app:www-data:750' ]"
+check "daemon has no TCP listener" bash -c "! ss -ltnp | grep -q \"pid=\$(systemctl show -p MainPID --value $app),\""
+check "other local users cannot reach the daemon" bash -c "! sudo -u nobody curl -s -m 3 --unix-socket '$sock' http://d/status"
 check "config.php is owner-only" bash -c "[ \"\$(stat -c %a '$install_dir/config.php')\" = 600 ]"
 check "sessions are owner-only" bash -c "[ \"\$(stat -c %U:%a '$data_dir/sessions')\" = '$app:700' ]"
 check "nginx (www-data) can read the UI" sudo -u www-data test -r "$install_dir/www/index.html"
 check "nginx (www-data) cannot read config.php" bash -c "! sudo -u www-data cat '$install_dir/config.php'"
 check "nginx (www-data) cannot read the sessions" bash -c "! sudo -u www-data ls '$data_dir/sessions'"
-check "daemon refuses requests without a user" bash -c "curl -s 127.0.0.1:$port/status | grep -q NOT_AUTHENTICATED"
-check "daemon answers for a user (without creating a session)" bash -c "curl -s -H 'Ynh-User: verify-probe' 127.0.0.1:$port/status | grep -q '\"state\":\"logged_out\"' && [ ! -e '$data_dir/sessions/verify-probe' ]"
+check "daemon refuses requests without a user" bash -c "curl -s --unix-socket '$sock' http://d/status | grep -q NOT_AUTHENTICATED"
+check "daemon answers for a user (without creating a session)" bash -c "curl -s --unix-socket '$sock' -H 'Ynh-User: verify-probe' http://d/status | grep -q '\"state\":\"logged_out\"' && [ ! -e '$data_dir/sessions/verify-probe' ]"
 
 base="https://$domain${path%/}"
 check "anonymous visitors are sent to the SSO" bash -c "curl -sk -o /dev/null -w '%{http_code} %{redirect_url}' --resolve '$domain:443:127.0.0.1' '$base/' | grep -qE '^30[0-9] .*(yunohost/sso|portal)'"

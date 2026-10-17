@@ -19,7 +19,7 @@ use Throwable;
  */
 final class Api implements RequestHandler
 {
-    private const USER_RE = '/^[a-z0-9_.-]{1,64}$/';
+    public const USER_RE = '/^[a-z0-9_.-]{1,64}$/';
     private const CSRF_HEADER = 'x-madeline';
     private const MAX_TEXT = 4096;
     private const PHOTO_MIMES = ['image/jpeg', 'image/png'];
