@@ -189,8 +189,20 @@ final class Api implements RequestHandler
         if (trim($text) === '') {
             throw new ApiError(HttpStatus::BAD_REQUEST, 'MESSAGE_EMPTY');
         }
-        $this->ready($user)->sendText($this->int($body['chat'] ?? null), $text);
+        $this->ready($user)->sendText($this->int($body['chat'] ?? null), $text, $this->replyTo($body['reply_to'] ?? null));
         return ['ok' => true];
+    }
+
+    private function replyTo(mixed $value): int
+    {
+        if ($value === null || $value === '') {
+            return 0;
+        }
+        $id = $this->int($value);
+        if ($id <= 0 || $id > 0x7fffffff) {
+            throw new ApiError(HttpStatus::BAD_REQUEST, 'BAD_REQUEST');
+        }
+        return $id;
     }
 
     private function read(string $user, array $body): array
@@ -203,6 +215,7 @@ final class Api implements RequestHandler
     {
         $account = $this->ready($user);
         $chat = $this->chat($request);
+        $replyTo = $this->replyTo($this->query($request, 'reply_to'));
         $name = basename(str_replace('\\', '/', $this->query($request, 'name')));
         $name = $name !== '' && $name !== '.' ? mb_substr($name, 0, 200) : 'file';
         $caption = mb_substr($this->query($request, 'caption'), 0, 1024);
@@ -233,7 +246,7 @@ final class Api implements RequestHandler
                 throw new ApiError(HttpStatus::BAD_REQUEST, 'FILE_EMPTY');
             }
             $asPhoto = \in_array($mime, self::PHOTO_MIMES, true) && $size <= self::PHOTO_MAX && $this->query($request, 'as') !== 'file';
-            $account->sendFile($chat, $tmp, $name, $mime, $caption, $asPhoto);
+            $account->sendFile($chat, $tmp, $name, $mime, $caption, $asPhoto, $replyTo);
         } finally {
             if (\is_resource($fh)) {
                 fclose($fh);

@@ -85,6 +85,14 @@ expect "$(api alice POST /send '{"chat":111,"text":"Привет 👋"}')" '{"ok
 expect "$(api alice GET '/history?chat=111')" 'Привет 👋' "sent message missing from history"
 pass "chat list, history and sending text work (UTF-8 included)"
 
+expect "$(api alice GET '/history?chat=111')" '"reply_to":1,"reply":{"id":1,"chat":111,"from":111,"from_name":"Alice"' "history lacks the reply summary"
+expect "$(api alice POST /send '{"chat":111,"text":"x","reply_to":-5}')" '"BAD_REQUEST"' "negative reply_to accepted"
+expect "$(api alice POST /send '{"chat":111,"text":"x","reply_to":"abc"}')" '"BAD_REQUEST"' "non-numeric reply_to accepted"
+expect "$(api alice POST /send '{"chat":111,"text":"my answer","reply_to":2}')" '{"ok":true}' "sending a reply failed"
+expect "$(api alice GET '/history?chat=111')" '"text":"my answer","media":null,"service":null,"edited":false,"reply_to":2,"reply":{"id":2,"chat":111,"from":111,"from_name":"Alice","out":false,"text":"Did you get my message?"' \
+    "the sent reply does not point at its message"
+pass "replies are listed with what they answer, and can be sent"
+
 # --- live events ----------------------------------------------------------
 curl -s -N -H 'Ynh-User: alice' localhost:8095/events >/tmp/alice.sse &
 curl -s -N -H 'Ynh-User: bob' localhost:8095/events >/tmp/bob.sse &
@@ -114,6 +122,10 @@ expect "$out" '{"ok":true}' "upload failed"
 hist="$(api alice GET '/history?chat=111')"
 expect "$hist" "sha1:$(sha1sum /tmp/f.txt | cut -d' ' -f1)" "uploaded content corrupted"
 expect "$hist" '"name":"notes.txt"' "upload file name not sanitised"
+out="$(curl -s -X POST -H 'Ynh-User: alice' -H 'X-Madeline: 1' -H 'Content-Type: text/plain' \
+    --data-binary @/tmp/f.txt 'localhost:8095/upload?chat=111&name=r.txt&reply_to=1')"
+expect "$out" '{"ok":true}' "upload as a reply failed"
+expect "$(api alice GET '/history?chat=111')" '"name":"r.txt","mime":"text/plain","size":10},"service":null,"edited":false,"reply_to":1,' "uploaded file is not a reply"
 head -c 1100000 /dev/zero >/tmp/big.bin
 out="$(curl -s -X POST -H 'Ynh-User: alice' -H 'X-Madeline: 1' --data-binary @/tmp/big.bin 'localhost:8095/upload?chat=111&name=big.bin')"
 expect "$out" '"FILE_TOO_LARGE"' "upload over the limit accepted"

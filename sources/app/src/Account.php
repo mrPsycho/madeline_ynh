@@ -30,9 +30,10 @@ interface Account
     /** @return array{messages: list<array>} */
     public function history(int $chat, int $before, int $limit): array;
 
-    public function sendText(int $chat, string $text): void;
+    /** @param int $replyTo id of the message of $chat answered, 0 for none */
+    public function sendText(int $chat, string $text, int $replyTo = 0): void;
 
-    public function sendFile(int $chat, string $path, string $name, string $mime, string $caption, bool $asPhoto): void;
+    public function sendFile(int $chat, string $path, string $name, string $mime, string $caption, bool $asPhoto, int $replyTo = 0): void;
 
     public function markRead(int $chat, int $maxId): void;
 

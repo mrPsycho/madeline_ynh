@@ -27,13 +27,29 @@ final class FakeAccount implements Account
     public function __construct(private readonly string $user)
     {
         $this->messages[111] = [$this->msg(111, 1, "Hello {$this->user}", false)];
+        $this->messages[111][] = $this->msg(111, 2, 'Did you get my message?', false, null, 1);
         $this->messages[-1000000000222] = [$this->msg(-1000000000222, 2, 'Channel post', false)];
     }
 
-    private function msg(int $chat, int $id, string $text, bool $out, ?array $media = null): array
+    private function msg(int $chat, int $id, string $text, bool $out, ?array $media = null, int $replyTo = 0): array
     {
         return ['id' => $id, 'chat' => $chat, 'date' => 1700000000 + $id, 'out' => $out, 'from' => $out ? null : $chat,
-            'from_name' => $out ? null : 'Alice', 'text' => $text, 'media' => $media, 'service' => null, 'edited' => false, 'reply_to' => null];
+            'from_name' => $out ? null : 'Alice', 'text' => $text, 'media' => $media, 'service' => null, 'edited' => false,
+            'reply_to' => $replyTo ?: null, 'reply' => $replyTo ? $this->reply($chat, $replyTo) : null];
+    }
+
+    /** Same shape as Normalizer::withReplies() output; unknown ids count as deleted messages. */
+    private function reply(int $chat, int $id): array
+    {
+        $reply = ['id' => $id, 'chat' => $chat, 'from' => null, 'from_name' => null, 'out' => false, 'text' => '',
+            'quote' => false, 'media' => null, 'service' => null, 'deleted' => true];
+        foreach ($this->messages[$chat] ?? [] as $m) {
+            if ($m['id'] === $id) {
+                return array_merge($reply, ['from' => $m['from'], 'from_name' => $m['from_name'], 'out' => $m['out'], 'text' => $m['text'],
+                    'media' => $m['media']['kind'] ?? null, 'deleted' => false]);
+            }
+        }
+        return $reply;
     }
 
     public function status(): array
@@ -99,18 +115,18 @@ final class FakeAccount implements Account
         return ['messages' => $this->messages[$chat]];
     }
 
-    public function sendText(int $chat, string $text): void
+    public function sendText(int $chat, string $text, int $replyTo = 0): void
     {
-        $message = $this->msg($chat, $this->nextId++, $text, true);
+        $message = $this->msg($chat, $this->nextId++, $text, true, null, $replyTo);
         $this->messages[$chat][] = $message;
         $this->emit(['type' => 'message', 'message' => $message, 'chat_title' => 'Alice', 'chat_kind' => 'user']);
     }
 
-    public function sendFile(int $chat, string $path, string $name, string $mime, string $caption, bool $asPhoto): void
+    public function sendFile(int $chat, string $path, string $name, string $mime, string $caption, bool $asPhoto, int $replyTo = 0): void
     {
         $content = (string) file_get_contents($path);
         $media = $asPhoto ? ['kind' => 'photo'] : ['kind' => 'file', 'name' => $name, 'mime' => $mime, 'size' => \strlen($content)];
-        $message = $this->msg($chat, $this->nextId++, $caption . ' sha1:' . sha1($content), true, $media);
+        $message = $this->msg($chat, $this->nextId++, $caption . ' sha1:' . sha1($content), true, $media, $replyTo);
         $this->messages[$chat][] = $message;
         $this->emit(['type' => 'message', 'message' => $message, 'chat_title' => 'Alice', 'chat_kind' => 'user']);
     }

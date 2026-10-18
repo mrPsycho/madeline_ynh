@@ -6,7 +6,7 @@ Each YunoHost user signs in with **their own** Telegram account (phone number, l
 
 - Chat list with unread counters, pinned chats and search
 - Read the history of private chats, groups and channels
-- Send text messages
+- Send text messages; reply to a message and see what each reply answers
 - Live updates: new, edited, deleted and read messages appear without reloading
 - View photos, stickers, videos, voice messages and audio; download any file
 - Upload files and photos (button, drag & drop or paste)

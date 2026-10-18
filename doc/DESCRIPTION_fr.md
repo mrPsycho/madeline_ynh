@@ -6,7 +6,7 @@ Chaque utilisateur de YunoHost se connecte avec **son propre** compte Telegram (
 
 - Liste des discussions avec compteurs de non-lus, discussions épinglées et recherche
 - Lecture de l'historique des discussions privées, groupes et canaux
-- Envoi de messages texte
+- Envoi de messages texte ; réponse à un message, avec l’aperçu du message auquel chaque réponse se rapporte
 - Mises à jour en direct : les messages nouveaux, modifiés, supprimés et lus apparaissent sans recharger
 - Affichage des photos, autocollants, vidéos, messages vocaux et audio ; téléchargement de tout fichier
 - Envoi de fichiers et de photos (bouton, glisser-déposer ou coller)

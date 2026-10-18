@@ -29,6 +29,7 @@
     file: 'M6 2h8l5 5v15H6z M14 2v5h5',
     pin: 'M9 3h6l-1 6 3 3H7l3-3z M12 12v9',
     lock: 'M6 11h12v10H6z M8 11V7a4 4 0 0 1 8 0v4',
+    reply: 'M9 14 4 9l5-5 M4 9h10a6 6 0 0 1 6 6v4',
   };
 
   function icon(name, size = 18) {
@@ -136,7 +137,8 @@
     current: null,
     messages: new Map(), // chat id -> messages, oldest first
     hasOlder: new Map(),
-    loadingOlder: false,
+    olderLoad: null, // pending loadOlder() promise
+    replyTo: null, // message the composer answers
     events: null,
     eventsOpenedOnce: false,
     codeType: '',
@@ -192,11 +194,33 @@
     return parts.join(': ');
   }
 
+  // Who wrote a message or replied-to message, as shown above a quote
+  function senderName(m) {
+    if (m.out) return t('you');
+    if (m.from_name === '') return t('deleted_account');
+    return m.from_name || '';
+  }
+
+  const hueOf = (id) => String(Math.abs(Number(BigInt(id || 0) % 360n)));
+
+  function quote(reply, attrs = {}) {
+    const node = el(attrs.onclick ? 'button' : 'div', { class: 'quote', type: attrs.onclick ? 'button' : null, ...attrs },
+      el('span', { class: 'quote-name ellipsis', text: reply.deleted ? t('reply_deleted') : senderName(reply) || t('reply_message') }),
+      reply.deleted ? null : el('span', { class: 'quote-text ellipsis', text: replyPreview(reply) }));
+    if (!reply.out && reply.from) node.style.setProperty('--quote', `hsl(${hueOf(reply.from)} 55% 50%)`);
+    return node;
+  }
+
+  // Like preview(), for the reply summaries the daemon sends (media is just its kind)
+  function replyPreview(reply) {
+    if (reply.service) return t('svc_' + reply.service);
+    return [reply.media ? t('media_' + reply.media) : '', reply.text].filter(Boolean).join(': ');
+  }
+
   function avatar(id, title) {
     const initials = title.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => Array.from(w)[0]).join('').toUpperCase() || '#';
-    const hue = Math.abs(Number(BigInt(id) % 360n));
     const node = el('span', { class: 'avatar', 'aria-hidden': 'true', text: initials });
-    node.style.setProperty('--hue', String(hue));
+    node.style.setProperty('--hue', hueOf(id));
     return node;
   }
 
@@ -338,6 +362,7 @@
     state.dialogs = [];
     state.dialogsNext = null;
     state.current = null;
+    state.replyTo = null;
     state.messages.clear();
     state.hasOlder.clear();
     document.title = t('app_title');
@@ -522,6 +547,7 @@
     state.dialogs = [];
     state.dialogsNext = null;
     state.current = null;
+    state.replyTo = null;
     state.messages.clear();
     state.hasOlder.clear();
     buildLayout();
@@ -579,6 +605,9 @@
         if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
           e.preventDefault();
           sendText();
+        } else if (e.key === 'Escape' && state.replyTo) {
+          e.preventDefault();
+          cancelReply();
         }
       },
       onpaste: (e) => {
@@ -590,6 +619,7 @@
       },
     });
     ui.send = el('button', { type: 'submit', class: 'primary', text: t('btn_send') });
+    ui.replyBar = el('div', { class: 'reply-bar', hidden: true });
     ui.composer = el('form', { class: 'composer', onsubmit: (e) => { e.preventDefault(); sendText(); } },
       el('button', { type: 'button', class: 'ghost attach', title: t('btn_attach'), 'aria-label': t('btn_attach'), onclick: () => ui.file.click() }, icon('attach', 22)),
       ui.file, ui.text, ui.send);
@@ -601,7 +631,7 @@
         el('button', { type: 'button', class: 'ghost back', text: '←', 'aria-label': t('back'), onclick: () => { ui.layout.dataset.view = 'list'; } }),
         ui.chatAvatar,
         el('div', { class: 'chat-title' }, ui.chatTitle, ui.chatSubtitle)),
-      ui.messages, ui.toast, ui.upload, ui.composer, ui.drop);
+      ui.messages, ui.toast, ui.upload, ui.replyBar, ui.composer, ui.drop);
 
     const main = el('main', { class: 'chat' }, ui.empty, ui.chatPane);
     let dragDepth = 0;
@@ -705,6 +735,7 @@
     ui.chatPane.hidden = false;
     ui.layout.dataset.view = 'chat';
     ui.toast.hidden = true;
+    if (state.replyTo && state.replyTo.chat !== id) cancelReply();
     renderDialogs();
 
     if (state.messages.has(id)) {
@@ -733,14 +764,23 @@
     state.messages.set(chat, [...byId.values()].sort((a, b) => a.id - b.id));
   }
 
-  async function loadOlder() {
+  // Resolves to false if nothing could be loaded
+  function loadOlder() {
+    if (state.olderLoad) return state.olderLoad;
     const chat = state.current;
     const list = state.messages.get(chat);
-    if (!chat || !list || !list.length || state.loadingOlder || !state.hasOlder.get(chat)) return;
-    state.loadingOlder = true;
+    if (!chat || !list || !list.length || !state.hasOlder.get(chat)) return Promise.resolve(false);
     ui.older.disabled = true;
+    state.olderLoad = fetchOlder(chat, list[0].id).finally(() => {
+      state.olderLoad = null;
+      ui.older.disabled = false;
+    });
+    return state.olderLoad;
+  }
+
+  async function fetchOlder(chat, before) {
     try {
-      const { messages } = await api(`history?chat=${chat}&before=${list[0].id}`);
+      const { messages } = await api(`history?chat=${chat}&before=${before}`);
       state.hasOlder.set(chat, messages.length >= PAGE);
       merge(chat, messages);
       if (state.current === chat) {
@@ -748,11 +788,10 @@
         renderMessages();
         ui.messages.scrollTop = ui.messages.scrollHeight - fromBottom;
       }
+      return true;
     } catch (e) {
       showToast(errorText(e));
-    } finally {
-      state.loadingOlder = false;
-      ui.older.disabled = false;
+      return false;
     }
   }
 
@@ -780,18 +819,91 @@
 
   function messageNode(m, showNames) {
     if (m.service) {
-      return el('div', { class: 'service' }, el('span', { text: (m.from_name ? m.from_name + ': ' : '') + t('svc_' + m.service) }));
+      // A pin's reply header names the pinned message
+      const pinned = m.service === 'pinned' && m.reply && !m.reply.deleted && replyPreview(m.reply);
+      return el('div', { class: 'service', 'data-id': m.id }, el('span', {
+        text: (m.from_name ? m.from_name + ': ' : '') + t('svc_' + m.service) + (pinned ? ` «${pinned}»` : ''),
+        class: pinned && m.reply_to ? 'jump' : null,
+        onclick: pinned && m.reply_to ? () => jumpTo(m.reply_to) : null,
+      }));
     }
     const bubble = el('div', { class: 'msg ' + (m.out ? 'out' : 'in'), 'data-id': m.id });
     if (showNames && !m.out && m.from_name) {
       const name = el('div', { class: 'from', text: m.from_name });
-      name.style.setProperty('--hue', String(Math.abs(Number(BigInt(m.from || 0) % 360n))));
+      name.style.setProperty('--hue', hueOf(m.from));
       bubble.append(name);
+    }
+    if (m.reply) {
+      // Replies to another chat's message can't be scrolled to
+      bubble.append(quote(m.reply, m.reply_to && !m.reply.deleted ? { onclick: () => jumpTo(m.reply_to) } : {}));
     }
     if (m.media) bubble.append(mediaNode(m));
     if (m.text) bubble.append(el('div', { class: 'text' }, linkify(m.text)));
     bubble.append(el('div', { class: 'meta muted small' }, m.edited ? t('edited') + ' · ' : '', timeFmt.format(new Date(m.date * 1000))));
-    return el('div', { class: 'row ' + (m.out ? 'out' : 'in') }, bubble);
+    const reply = el('button', {
+      type: 'button', class: 'ghost reply-button', title: t('btn_reply'), 'aria-label': t('btn_reply'),
+      onclick: () => startReply(m),
+    }, icon('reply', 18));
+    return el('div', { class: 'row ' + (m.out ? 'out' : 'in') }, ...(m.out ? [reply, bubble] : [bubble, reply]));
+  }
+
+  // ---------------------------------------------------------------- replies
+  function startReply(m) {
+    if (m.chat !== state.current) return;
+    state.replyTo = m;
+    renderReplyBar();
+    ui.text.focus();
+  }
+
+  function cancelReply() {
+    state.replyTo = null;
+    renderReplyBar();
+  }
+
+  function renderReplyBar() {
+    const m = state.replyTo;
+    ui.replyBar.hidden = !m;
+    if (!m) return;
+    const target = quote({ ...m, media: m.media?.kind || null }, { onclick: () => jumpTo(m.id) });
+    target.firstChild.textContent = t('replying_to', senderName(m) || t('reply_message'));
+    ui.replyBar.replaceChildren(
+      el('span', { class: 'reply-icon' }, icon('reply', 20)),
+      target,
+      el('button', { type: 'button', class: 'ghost', text: '✕', title: t('cancel_reply'), 'aria-label': t('cancel_reply'), onclick: () => { cancelReply(); ui.text.focus(); } }));
+  }
+
+  const messageElement = (id) => ui.list.querySelector(`[data-id="${Number(id)}"]`);
+
+  // Scroll to a message of the open chat, loading older pages until it shows up
+  async function jumpTo(id) {
+    const chat = state.current;
+    let node = messageElement(id);
+    for (let pages = 0; !node && pages < 25; pages++) {
+      const list = state.messages.get(chat) || [];
+      // Ids only grow within a chat: once older ones are loaded, it's gone
+      if (state.current !== chat || !list.length || list[0].id < id || !state.hasOlder.get(chat)) break;
+      if (!(await loadOlder())) return;
+      node = messageElement(id);
+    }
+    if (state.current !== chat) return;
+    if (!node) {
+      showToast(t('reply_not_found'));
+      return;
+    }
+    const target = node.classList.contains('service') ? node.firstChild : node;
+    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    target.classList.remove('highlight');
+    void target.offsetWidth; // restart the animation
+    target.classList.add('highlight');
+  }
+
+  // Keep the quotes of replies in step with edits and deletions of their originals
+  function updateReplies(chat, original, deleted = false) {
+    for (const m of state.messages.get(chat) || []) {
+      if (m.reply_to !== original.id || !m.reply) continue;
+      if (deleted) m.reply = { ...m.reply, deleted: true };
+      else if (!m.reply.quote) m.reply = { ...m.reply, text: original.text, media: original.media?.kind || null };
+    }
   }
 
   function mediaNode(m) {
@@ -855,11 +967,13 @@
     const chat = state.current;
     const text = ui.text.value;
     if (!chat || !text.trim()) return;
+    const replyTo = state.replyTo?.chat === chat ? state.replyTo.id : undefined;
     ui.send.disabled = true;
     try {
-      await api('send', { method: 'POST', body: { chat, text } });
+      await api('send', { method: 'POST', body: { chat, text, reply_to: replyTo } });
       ui.text.value = '';
       autosize();
+      if (state.replyTo?.id === replyTo) cancelReply();
       await refreshLatest(chat);
     } catch (e) {
       showToast(errorText(e));
@@ -873,23 +987,27 @@
     const chat = state.current;
     if (!chat || !files.length) return;
     let caption = ui.text.value.trim();
+    let replyTo = state.replyTo?.chat === chat ? state.replyTo.id : 0;
     ui.text.value = '';
     autosize();
+    if (replyTo) cancelReply();
     for (const file of files) {
       try {
-        await upload(chat, file, caption);
+        await upload(chat, file, caption, replyTo);
       } catch (e) {
         showToast(`${file.name}: ${errorText(e)}`);
       }
       caption = '';
+      replyTo = 0;
     }
     ui.upload.hidden = true;
     await refreshLatest(chat);
   }
 
-  function upload(chat, file, caption) {
+  function upload(chat, file, caption, replyTo) {
     return new Promise((resolve, reject) => {
       const params = new URLSearchParams({ chat: String(chat), name: file.name || 'file', caption });
+      if (replyTo) params.set('reply_to', String(replyTo));
       const xhr = new XMLHttpRequest();
       xhr.open('POST', 'api/upload?' + params);
       xhr.setRequestHeader('X-Madeline', '1');
@@ -992,6 +1110,11 @@
       case 'edit': {
         const m = event.message;
         if (state.messages.has(m.chat)) merge(m.chat, [m]);
+        updateReplies(m.chat, m);
+        if (state.replyTo && state.replyTo.chat === m.chat && state.replyTo.id === m.id) {
+          state.replyTo = m;
+          renderReplyBar();
+        }
         const dialog = dialogFor(m.chat);
         if (dialog && dialog.last && dialog.last.id === m.id) {
           dialog.last = m;
@@ -1005,8 +1128,11 @@
         for (const [chat, list] of state.messages) {
           if (event.chat === null ? isPrivateOrBasicGroup(chat) : chat === event.chat) {
             state.messages.set(chat, list.filter((m) => !ids.has(m.id)));
+            for (const id of ids) updateReplies(chat, { id }, true);
           }
         }
+        const r = state.replyTo;
+        if (r && ids.has(r.id) && (event.chat === null ? isPrivateOrBasicGroup(r.chat) : r.chat === event.chat)) cancelReply();
         if (state.current) renderMessages();
         break;
       }

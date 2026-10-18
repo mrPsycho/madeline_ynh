@@ -124,6 +124,55 @@ $check('service message', ['joined', ''], [$history[1]['service'], $history[1]['
 $check('reply and edit flags', [40, false, true], [$history[0]['reply_to'], $history[0]['edited'], $history[2]['edited']]);
 $check('outgoing flag', [false, true], [$history[3]['out'], $history[4]['out']]);
 
+// ---- replies -------------------------------------------------------------
+$header = static fn (int $to, array $extra = []) => ['reply_to' => ['_' => 'messageReplyHeader', 'reply_to_msg_id' => $to] + $extra];
+$replies = Normalizer::history($roundTrip(['_' => 'messages.channelMessages', 'pts' => 1, 'count' => 7, 'messages' => [
+    $msg($peerSuper, 60, "original\n  text", ['from_id' => $peerUser, 'media' => ['_' => 'messageMediaPhoto', 'photo' => [
+        '_' => 'photo', 'id' => 9, 'access_hash' => 1, 'file_reference' => '', 'date' => 1, 'sizes' => [], 'dc_id' => 2,
+    ]]]),
+    $msg($peerSuper, 61, 'answer', ['out' => true, 'from_id' => $peerMe] + $header(60)),
+    $msg($peerSuper, 62, 'quoting', ['from_id' => $peerUser] + $header(60, ['quote' => true, 'quote_text' => 'orig'])),
+    $msg($peerSuper, 63, 'old one', ['from_id' => $peerUser] + $header(10)),
+    $msg($peerSuper, 64, 'in a topic', ['from_id' => $peerUser] + $header(5, ['forum_topic' => true])),
+    $msg($peerSuper, 65, 'reply in a topic', ['from_id' => $peerUser] + $header(61, ['forum_topic' => true, 'reply_to_top_id' => 5])),
+    $msg($peerSuper, 66, 'elsewhere', ['from_id' => $peerUser] + $header(30, ['reply_to_peer_id' => $peerChannel])),
+], 'chats' => $chats, 'users' => $users]));
+$byId = array_column($replies, null, 'id');
+$check('a reply to a message of the same page is resolved',
+    ['id' => 60, 'chat' => -1000000000000 - SUPERGROUP, 'from' => ALICE, 'from_name' => 'Alice Liddell', 'out' => false, 'text' => 'original text', 'quote' => false, 'media' => 'photo', 'service' => null, 'deleted' => false],
+    $byId[61]['reply']);
+$check('reply_to is the replied-to id', 60, $byId[61]['reply_to']);
+$check('a quote shows the quoted part', ['orig', true, 'Alice Liddell'], [$byId[62]['reply']['text'], $byId[62]['reply']['quote'], $byId[62]['reply']['from_name']]);
+$check('a reply to a message not on the page stays a stub', [10, null, '', false], [$byId[63]['reply_to'], $byId[63]['reply']['from_name'], $byId[63]['reply']['text'], $byId[63]['reply']['deleted']]);
+$check('a forum-topic header alone is no reply', [null, null], [$byId[64]['reply_to'], $byId[64]['reply']]);
+$check('a reply inside a forum topic is one', [61, true], [$byId[65]['reply_to'], $byId[65]['reply']['out']]);
+$check('a reply to another chat cannot be jumped to', [null, -1000000000000 - CHANNEL, 'News'], [$byId[66]['reply_to'], $byId[66]['reply']['chat'], $byId[66]['reply']['from_name']]);
+$check('replied-to messages missing from the page', [10], Normalizer::missingReplies($replies, -1000000000000 - SUPERGROUP));
+
+// What MadelineAccount::resolveReplies() gets back from channels.getMessages
+$fetched = $roundTrip(['_' => 'messages.channelMessages', 'pts' => 1, 'count' => 2, 'messages' => [
+    $msg($peerSuper, 10, 'long ago ' . str_repeat('x', 200), ['from_id' => ['_' => 'peerUser', 'user_id' => 555]]),
+    ['_' => 'messageEmpty', 'id' => 11],
+], 'chats' => $chats, 'users' => $users]);
+$known = Normalizer::messagesById($fetched, -1000000000000 - SUPERGROUP);
+$check('fetched messages by id, deleted ones as null', [10, 11], array_keys($known));
+$check('deleted replied-to message', null, $known[11]);
+$resolved = Normalizer::withReplies([$byId[63], ['reply_to' => 11, 'reply' => ['id' => 11, 'quote' => false, 'deleted' => false] + $byId[63]['reply']] + $byId[63]], $known);
+$check('a fetched replied-to message completes the stub', [555, '', 151], [$resolved[0]['reply']['from'], $resolved[0]['reply']['from_name'], mb_strlen($resolved[0]['reply']['text'])]);
+$check('a reply to a deleted message says so', true, $resolved[1]['reply']['deleted']);
+
+$forwarded = Normalizer::message($roundTrip($msg($peerSuper, 70, 'x', ['from_id' => $peerUser] + $header(3, [
+    'reply_to_peer_id' => $peerChannel, 'reply_from' => ['_' => 'messageFwdHeader', 'date' => 1, 'from_name' => 'Hidden Sender'],
+]))), []);
+$check('a hidden original sender is named by the reply header', 'Hidden Sender', $forwarded['reply']['from_name']);
+
+$pin = Normalizer::history($roundTrip(['_' => 'messages.messages', 'messages' => [
+    $msg($peerUser, 7, 'pin me'),
+    ['_' => 'messageService', 'id' => 8, 'peer_id' => $peerUser, 'from_id' => $peerUser, 'date' => 1700000008,
+        'action' => ['_' => 'messageActionPinMessage']] + $header(7),
+], 'chats' => [], 'users' => $users]));
+$check('a pin names the pinned message', ['pinned', 'pin me'], [$pin[1]['service'], $pin[1]['reply']['text']]);
+
 // ---- private chat without from_id, and channel posts --------------------
 $private = Normalizer::history($roundTrip(['_' => 'messages.messages', 'messages' => [
     $msg($peerUser, 7, 'incoming'),

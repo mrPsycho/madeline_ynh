@@ -216,20 +216,25 @@ final class MadelineAccount implements Account
             hash: 0,
         ));
         $this->rememberPeers($result);
-        return ['messages' => Normalizer::history($result)];
+        return ['messages' => $this->resolveReplies($chat, Normalizer::history($result))];
     }
 
-    public function sendText(int $chat, string $text): void
+    public function sendText(int $chat, string $text, int $replyTo = 0): void
     {
-        $this->call(fn (API $api) => $api->messages->sendMessage(peer: $chat, message: $text));
+        $args = ['peer' => $chat, 'message' => $text];
+        if ($replyTo > 0) {
+            $args['reply_to'] = ['_' => 'inputReplyToMessage', 'reply_to_msg_id' => $replyTo];
+        }
+        $this->call(fn (API $api) => $api->messages->sendMessage(...$args));
     }
 
-    public function sendFile(int $chat, string $path, string $name, string $mime, string $caption, bool $asPhoto): void
+    public function sendFile(int $chat, string $path, string $name, string $mime, string $caption, bool $asPhoto, int $replyTo = 0): void
     {
         $file = new LocalFile($path);
+        $reply = $replyTo > 0 ? $replyTo : null;
         $this->call(fn (API $api) => $asPhoto
-            ? $api->sendPhoto(peer: $chat, file: $file, caption: $caption, fileName: $name)
-            : $api->sendDocument(peer: $chat, file: $file, caption: $caption, fileName: $name, mimeType: $mime));
+            ? $api->sendPhoto(peer: $chat, file: $file, caption: $caption, fileName: $name, replyToMsgId: $reply)
+            : $api->sendDocument(peer: $chat, file: $file, caption: $caption, fileName: $name, mimeType: $mime, replyToMsgId: $reply));
     }
 
     public function markRead(int $chat, int $maxId): void
@@ -241,9 +246,7 @@ final class MadelineAccount implements Account
 
     public function mediaResponse(int $chat, int $messageId, Request $request, bool $download): Response
     {
-        $result = $this->call(fn (API $api) => Normalizer::isChannelId($chat)
-            ? $api->channels->getMessages(channel: $chat, id: [$messageId])
-            : $api->messages->getMessages(id: [$messageId]));
+        $result = $this->fetchMessages($chat, [$messageId]);
 
         foreach ($result['messages'] ?? [] as $m) {
             if (($m['id'] ?? 0) !== $messageId || !isset($m['peer_id'], $m['media'])
@@ -267,6 +270,39 @@ final class MadelineAccount implements Account
             return $response;
         }
         throw new ApiError(HttpStatus::NOT_FOUND, 'MEDIA_NOT_FOUND');
+    }
+
+    /** @param list<int> $ids */
+    private function fetchMessages(int $chat, array $ids): array
+    {
+        return $this->call(fn (API $api) => Normalizer::isChannelId($chat)
+            ? $api->channels->getMessages(channel: $chat, id: $ids)
+            : $api->messages->getMessages(id: $ids));
+    }
+
+    /**
+     * Fill in the replied-to messages that are not part of $messages. Best
+     * effort: on failure the replies only show what their header tells.
+     *
+     * @param list<array> $messages normalized messages of $chat
+     * @return list<array>
+     */
+    private function resolveReplies(int $chat, array $messages): array
+    {
+        $missing = Normalizer::missingReplies($messages, $chat);
+        if ($missing === []) {
+            return $messages;
+        }
+        try {
+            $result = $this->fetchMessages($chat, $missing);
+        } catch (Throwable $e) {
+            $this->logger->warning('Could not fetch replied messages: ' . $e->getMessage());
+            return $messages;
+        }
+        $this->rememberPeers($result);
+        // Asked for but not returned: gone as well
+        $known = Normalizer::messagesById($result, $chat) + array_fill_keys($missing, null);
+        return Normalizer::withReplies($messages, $known);
     }
 
     public function onEvent(Closure $listener): void
@@ -452,6 +488,7 @@ final class MadelineAccount implements Account
                 if ($message === null) {
                     return null;
                 }
+                $message = $this->resolveReplies($chat, [$message])[0];
                 return [
                     'type'       => str_contains($update['_'], 'Edit') ? 'edit' : 'message',
                     'message'    => $message,

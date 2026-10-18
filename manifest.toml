@@ -6,7 +6,7 @@ name = "Madeline"
 description.en = "Telegram web client for your YunoHost users, powered by MadelineProto"
 description.fr = "Client web Telegram pour les utilisateurs de YunoHost, propulsé par MadelineProto"
 
-version = "8.7.0~ynh5"
+version = "8.7.0~ynh6"
 
 maintainers = ["mrpsycho"]
 
